@@ -3,13 +3,9 @@ package com.hrconnect.android.presentation.features.results
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.hrconnect.android.data.llm.GemmaReportAnalyzer
-import com.hrconnect.android.data.llm.ModelDownloadManager
-import com.hrconnect.android.domain.llm.ReportPromptBuilder
 import com.hrconnect.android.domain.model.CheckResult
 import com.hrconnect.android.domain.model.Submission
 import com.hrconnect.android.domain.repository.SubmissionsRepository
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,49 +16,16 @@ import logcat.LogPriority.DEBUG
 import logcat.LogPriority.ERROR
 import logcat.logcat
 
-/** Состояние локального AI-анализа. */
-sealed interface LocalAiState {
-    /** Кнопка ещё не нажата. */
-    data object Idle : LocalAiState
-
-    /** Модель не скачана. */
-    data object ModelNotDownloaded : LocalAiState
-
-    /** Идёт скачивание модели, [progress] 0..100. */
-    data class Downloading(val progress: Int) : LocalAiState
-
-    /** Модель инициализируется. */
-    data object Initializing : LocalAiState
-
-    /** Идёт генерация, [text] — накопленный текст. */
-    data class Generating(val text: String) : LocalAiState
-
-    /** Генерация завершена. */
-    data class Done(val text: String) : LocalAiState
-
-    /** Ошибка. */
-    data class Error(val message: String) : LocalAiState
-}
-
-/**
- * Состояние экрана «Результаты проверки».
- */
 data class SubmissionResultsUiState(
     val submission: Submission? = null,
     val checkResults: List<CheckResult> = emptyList(),
     val aiReview: String? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
-    val localAiState: LocalAiState = LocalAiState.Idle,
 )
 
-/**
- * ViewModel экрана «Результаты проверки».
- */
 class SubmissionResultsViewModel(
     private val submissionsRepository: SubmissionsRepository,
-    private val gemmaAnalyzer: GemmaReportAnalyzer,
-    private val modelDownloadManager: ModelDownloadManager,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -75,13 +38,8 @@ class SubmissionResultsViewModel(
     private val _uiState = MutableStateFlow(SubmissionResultsUiState())
     val uiState: StateFlow<SubmissionResultsUiState> = _uiState.asStateFlow()
 
-    private var downloadJob: Job? = null
-    private var analysisJob: Job? = null
-
     init {
         logcat(TAG) { "Инициализация — submissionId=$submissionId" }
-        // Инициализируем модель если уже скачана
-        gemmaAnalyzer.initIfReady()
         loadData()
     }
 
@@ -102,11 +60,16 @@ class SubmissionResultsViewModel(
                     logcat(TAG, DEBUG) {
                         "Проверка загружена — status=${submission.status}, score=${submission.finalScore}"
                     }
+                    val checkResults = resultsResult.getOrDefault(emptyList())
+                    logcat(TAG, DEBUG) { "Результатов чекеров — count=${checkResults.size}" }
+                    if (aiReview == null) {
+                        logcat(TAG) { "AI-анализ недоступен — submissionId=$submissionId" }
+                    }
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             submission = submission,
-                            checkResults = resultsResult.getOrDefault(emptyList()),
+                            checkResults = checkResults,
                             aiReview = aiReview
                         )
                     }
@@ -119,74 +82,5 @@ class SubmissionResultsViewModel(
                 }
             )
         }
-    }
-
-    /** Пользователь нажал «Анализировать локально». */
-    fun requestLocalAnalysis() {
-        when {
-            gemmaAnalyzer.isModelReady -> startAnalysis()
-            modelDownloadManager.isModelDownloaded() -> initAndAnalyze()
-            else -> _uiState.update { it.copy(localAiState = LocalAiState.ModelNotDownloaded) }
-        }
-    }
-
-    /** Начать скачивание модели. */
-    fun startModelDownload() {
-        downloadJob?.cancel()
-        downloadJob = viewModelScope.launch {
-            val downloadId = modelDownloadManager.startDownload()
-            modelDownloadManager.downloadProgress(downloadId).collect { progress ->
-                if (progress == -1) {
-                    _uiState.update {
-                        it.copy(localAiState = LocalAiState.Error("Ошибка загрузки модели"))
-                    }
-                } else {
-                    _uiState.update { it.copy(localAiState = LocalAiState.Downloading(progress)) }
-                    if (progress == 100) {
-                        initAndAnalyze()
-                    }
-                }
-            }
-        }
-    }
-
-    private fun initAndAnalyze() {
-        _uiState.update { it.copy(localAiState = LocalAiState.Initializing) }
-        val ok = gemmaAnalyzer.initIfReady()
-        if (ok) {
-            startAnalysis()
-        } else {
-            _uiState.update {
-                it.copy(localAiState = LocalAiState.Error("Не удалось инициализировать модель"))
-            }
-        }
-    }
-
-    private fun startAnalysis() {
-        val state = _uiState.value
-        val submission = state.submission ?: return
-        analysisJob?.cancel()
-        analysisJob = viewModelScope.launch {
-            _uiState.update { it.copy(localAiState = LocalAiState.Generating("")) }
-            try {
-                val prompt = ReportPromptBuilder.build(submission, state.checkResults)
-                gemmaAnalyzer.analyze(prompt).collect { token ->
-                    val current = (_uiState.value.localAiState as? LocalAiState.Generating)?.text ?: ""
-                    _uiState.update { it.copy(localAiState = LocalAiState.Generating(current + token)) }
-                }
-                val finalText = (_uiState.value.localAiState as? LocalAiState.Generating)?.text ?: ""
-                _uiState.update { it.copy(localAiState = LocalAiState.Done(finalText)) }
-            } catch (e: Exception) {
-                logcat(TAG, ERROR) { "Ошибка генерации: ${e.message}" }
-                _uiState.update {
-                    it.copy(localAiState = LocalAiState.Error(e.message ?: "Ошибка генерации"))
-                }
-            }
-        }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        gemmaAnalyzer.release()
     }
 }
