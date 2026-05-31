@@ -257,7 +257,7 @@ class SubmissionsRepositoryImpl(
             if (response.error != null) {
                 Result.failure(Exception(response.error))
             } else {
-                Result.success(response.data ?: "")
+                Result.success(response.data?.review ?: "")
             }
         } catch (e: Exception) {
             logcat(TAG, ERROR) {

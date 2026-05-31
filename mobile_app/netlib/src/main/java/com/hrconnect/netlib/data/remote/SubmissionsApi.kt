@@ -1,5 +1,6 @@
 package com.hrconnect.netlib.data.remote
 
+import com.hrconnect.netlib.data.remote.dto.AiReviewResponse
 import com.hrconnect.netlib.data.remote.dto.CheckResultResponse
 import com.hrconnect.netlib.data.remote.dto.ResponseWrapper
 import com.hrconnect.netlib.data.remote.dto.SubmissionResponse
@@ -63,7 +64,7 @@ interface SubmissionsApi {
     ): ResponseWrapper<SubmissionResponse>
 
     @GET("/api/v1/submissions/{submission_id}/ai-review")
-    suspend fun getAiReview(@Path("submission_id") id: String): ResponseWrapper<String>
+    suspend fun getAiReview(@Path("submission_id") id: String): ResponseWrapper<AiReviewResponse>
 
     @GET("/api/v1/submissions/{submission_id}/report")
     suspend fun getReportUrl(@Path("submission_id") id: String): ResponseWrapper<String>
