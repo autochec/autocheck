@@ -8,6 +8,7 @@ import com.hrconnect.netlib.data.remote.dto.VerdictRequest
 import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Part
@@ -36,6 +37,7 @@ interface SubmissionsApi {
      * @param assignmentId ID задания
      * @param file ZIP-файл
      */
+    @Multipart
     @POST("/api/v1/submissions/upload")
     suspend fun submitZip(
         @Query("assignment_id") assignmentId: String,
