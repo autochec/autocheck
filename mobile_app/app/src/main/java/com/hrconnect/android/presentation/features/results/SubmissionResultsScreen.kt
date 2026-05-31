@@ -48,7 +48,6 @@ import com.hrconnect.uikit.presentation.components.buttons.PrimaryButton
 import com.hrconnect.uikit.presentation.components.buttons.SecondaryButton
 import com.hrconnect.uikit.presentation.components.cards.ResultRow
 import com.hrconnect.uikit.presentation.components.score_card.ScoreCard
-import dev.jeziellago.compose.markdowntext.MarkdownText
 import org.koin.compose.viewmodel.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -239,10 +238,11 @@ private fun AiReviewSection(
                         .background(HrTheme.colorScheme.container)
                         .padding(16.dp)
                 ) {
-                    MarkdownText(
-                        markdown = state.text,
+                    Text(
+                        text = state.text,
                         style = TextStyle(
                             fontFamily = Manrope,
+                            fontWeight = FontWeight.Normal,
                             fontSize = 13.sp,
                             lineHeight = 20.sp,
                             color = HrTheme.colorScheme.onBackground
