@@ -1,9 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
+
+val localProps = Properties().also { props ->
+    val file = rootProject.file("local.properties")
+    if (file.exists()) props.load(file.inputStream())
+}
+val openRouterKey: String = localProps.getProperty("OPENROUTER_API_KEY", "")
 
 android {
     namespace = "com.hrconnect.android"
@@ -12,12 +20,6 @@ android {
             minorApiLevel = 1
         }
     }
-
-    val localProps = rootProject.file("local.properties")
-    val openRouterKey = if (localProps.exists()) {
-        java.util.Properties().apply { load(localProps.inputStream()) }
-            .getProperty("OPENROUTER_API_KEY", "")
-    } else ""
 
     defaultConfig {
         applicationId = "com.hrconnect.android"
