@@ -5,11 +5,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,8 +44,11 @@ import com.hrconnect.android.domain.model.SubmissionStatus
 import com.hrconnect.uikit.common.theme.HrTheme
 import com.hrconnect.uikit.common.theme.Manrope
 import com.hrconnect.uikit.presentation.components.badge.StatusType
+import com.hrconnect.uikit.presentation.components.buttons.PrimaryButton
+import com.hrconnect.uikit.presentation.components.buttons.SecondaryButton
 import com.hrconnect.uikit.presentation.components.cards.ResultRow
 import com.hrconnect.uikit.presentation.components.score_card.ScoreCard
+import dev.jeziellago.compose.markdowntext.MarkdownText
 import org.koin.compose.viewmodel.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,7 +125,8 @@ fun SubmissionResultsScreen(
                 ResultsContent(
                     submission = uiState.submission!!,
                     checkResults = uiState.checkResults,
-                    aiReview = uiState.aiReview,
+                    aiReviewState = uiState.aiReviewState,
+                    onRequestAiReview = viewModel::requestAiReview,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues)
@@ -134,7 +140,8 @@ fun SubmissionResultsScreen(
 private fun ResultsContent(
     submission: Submission,
     checkResults: List<CheckResult>,
-    aiReview: String?,
+    aiReviewState: AiReviewState,
+    onRequestAiReview: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -142,6 +149,7 @@ private fun ResultsContent(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Итоговый балл
         item {
             ScoreCard(
                 score = submission.finalScore?.toInt() ?: 0,
@@ -151,6 +159,7 @@ private fun ResultsContent(
             )
         }
 
+        // Детализация чекеров
         if (checkResults.isNotEmpty()) {
             item { SectionTitle("Детализация проверок") }
             items(items = checkResults, key = { it.checker }) { result ->
@@ -164,10 +173,113 @@ private fun ResultsContent(
             }
         }
 
+        // AI-анализ
         item {
             SectionTitle("AI-анализ")
             Spacer(modifier = Modifier.height(8.dp))
-            AiReviewSection(aiReview = aiReview)
+            AiReviewSection(
+                state = aiReviewState,
+                onRequest = onRequestAiReview
+            )
+        }
+    }
+}
+
+@Composable
+private fun AiReviewSection(
+    state: AiReviewState,
+    onRequest: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        when (state) {
+            is AiReviewState.Idle -> {
+                PrimaryButton(
+                    label = "Запросить AI-анализ",
+                    onClick = onRequest,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            is AiReviewState.Loading -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(HrTheme.colorScheme.container)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = HrTheme.colorScheme.primary,
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            text = "Анализируем результаты…",
+                            style = TextStyle(
+                                fontFamily = Manrope,
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 14.sp,
+                                color = HrTheme.colorScheme.description
+                            )
+                        )
+                    }
+                }
+            }
+
+            is AiReviewState.Done -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(HrTheme.colorScheme.container)
+                        .padding(16.dp)
+                ) {
+                    MarkdownText(
+                        markdown = state.text,
+                        style = TextStyle(
+                            fontFamily = Manrope,
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp,
+                            color = HrTheme.colorScheme.onBackground
+                        )
+                    )
+                }
+                SecondaryButton(
+                    label = "Обновить анализ",
+                    onClick = onRequest,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            is AiReviewState.Error -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(HrTheme.colorScheme.error.copy(alpha = 0.08f))
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = state.message,
+                        style = TextStyle(
+                            fontFamily = Manrope,
+                            fontWeight = FontWeight.Normal,
+                            fontSize = 13.sp,
+                            color = HrTheme.colorScheme.error
+                        )
+                    )
+                }
+                SecondaryButton(
+                    label = "Попробовать снова",
+                    onClick = onRequest,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }
@@ -184,49 +296,6 @@ private fun SectionTitle(title: String) {
             color = HrTheme.colorScheme.onBackground
         )
     )
-}
-
-@Composable
-private fun AiReviewSection(aiReview: String?) {
-    if (aiReview.isNullOrBlank()) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(HrTheme.colorScheme.neutral.copy(alpha = 0.1f))
-                .padding(16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "AI-анализ недоступен",
-                style = TextStyle(
-                    fontFamily = Manrope,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 14.sp,
-                    color = HrTheme.colorScheme.description
-                )
-            )
-        }
-    } else {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(HrTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
-                .padding(16.dp)
-        ) {
-            Text(
-                text = aiReview,
-                style = TextStyle(
-                    fontFamily = Manrope,
-                    fontWeight = FontWeight.Normal,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                    color = HrTheme.colorScheme.onBackground
-                )
-            )
-        }
-    }
 }
 
 private fun SubmissionStatus.toStatusType(): StatusType = when (this) {
