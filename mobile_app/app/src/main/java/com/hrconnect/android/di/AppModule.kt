@@ -1,5 +1,7 @@
 package com.hrconnect.android.di
 
+import com.hrconnect.android.BuildConfig
+import com.hrconnect.android.data.ai.OpenRouterClient
 import com.hrconnect.android.data.repository.AssignmentsRepositoryImpl
 import com.hrconnect.android.data.repository.AuthRepositoryImpl
 import com.hrconnect.android.data.repository.SubmissionsRepositoryImpl
@@ -20,6 +22,9 @@ val appModule = module {
     singleOf(::AuthRepositoryImpl).bind<AuthRepository>()
     singleOf(::SubmissionsRepositoryImpl).bind<SubmissionsRepository>()
     singleOf(::AssignmentsRepositoryImpl).bind<AssignmentsRepository>()
+
+    // OpenRouter AI
+    single { OpenRouterClient(apiKey = BuildConfig.OPENROUTER_API_KEY) }
 
     // ViewModels
     viewModelOf(::LoginViewModel)

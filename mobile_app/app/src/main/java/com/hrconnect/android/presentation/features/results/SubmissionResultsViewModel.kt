@@ -3,6 +3,7 @@ package com.hrconnect.android.presentation.features.results
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hrconnect.android.data.ai.OpenRouterClient
 import com.hrconnect.android.domain.model.CheckResult
 import com.hrconnect.android.domain.model.Submission
 import com.hrconnect.android.domain.repository.SubmissionsRepository
@@ -17,18 +18,10 @@ import logcat.LogPriority.DEBUG
 import logcat.LogPriority.ERROR
 import logcat.logcat
 
-/** Состояние секции AI-анализа на экране результатов. */
 sealed interface AiReviewState {
-    /** Анализ ещё не запрашивался. */
     data object Idle : AiReviewState
-
-    /** Идёт запрос к бекенду. */
     data object Loading : AiReviewState
-
-    /** Анализ получен. */
     data class Done(val text: String) : AiReviewState
-
-    /** Ошибка при получении анализа. */
     data class Error(val message: String) : AiReviewState
 }
 
@@ -42,6 +35,7 @@ data class SubmissionResultsUiState(
 
 class SubmissionResultsViewModel(
     private val submissionsRepository: SubmissionsRepository,
+    private val openRouterClient: OpenRouterClient,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -68,10 +62,7 @@ class SubmissionResultsViewModel(
             val submissionDeferred = async { submissionsRepository.getSubmission(submissionId) }
             val resultsDeferred = async { submissionsRepository.getResults(submissionId) }
 
-            val submissionResult = submissionDeferred.await()
-            val resultsResult = resultsDeferred.await()
-
-            submissionResult.fold(
+            submissionDeferred.await().fold(
                 onSuccess = { submission ->
                     logcat(TAG, DEBUG) {
                         "Проверка загружена — status=${submission.status}, score=${submission.finalScore}"
@@ -80,7 +71,7 @@ class SubmissionResultsViewModel(
                         it.copy(
                             isLoading = false,
                             submission = submission,
-                            checkResults = resultsResult.getOrDefault(emptyList()),
+                            checkResults = resultsDeferred.await().getOrDefault(emptyList()),
                         )
                     }
                 },
@@ -94,29 +85,37 @@ class SubmissionResultsViewModel(
         }
     }
 
-    /** Запросить AI-анализ у бекенда (по кнопке пользователя). */
+    /** Запрашивает AI-анализ напрямую через OpenRouter. */
     fun requestAiReview() {
+        val state = _uiState.value
+        val submission = state.submission ?: return
+
         aiJob?.cancel()
         aiJob = viewModelScope.launch {
             _uiState.update { it.copy(aiReviewState = AiReviewState.Loading) }
-            logcat(TAG) { "Запрос AI-анализа — submissionId=$submissionId" }
+            logcat(TAG) { "Запрос AI-анализа через OpenRouter — submissionId=$submissionId" }
 
-            submissionsRepository.getAiReview(submissionId).fold(
-                onSuccess = { text ->
-                    logcat(TAG, DEBUG) { "AI-анализ получен — длина=${text.length}" }
-                    _uiState.update { it.copy(aiReviewState = AiReviewState.Done(text)) }
-                },
-                onFailure = { e ->
-                    logcat(TAG, ERROR) { "Ошибка AI-анализа: ${e.message}" }
-                    _uiState.update {
-                        it.copy(
-                            aiReviewState = AiReviewState.Error(
-                                e.message ?: "Не удалось получить анализ"
-                            )
-                        )
-                    }
+            try {
+                val checkResultsText = state.checkResults.joinToString("\n") { r ->
+                    "• ${r.checker}: ${r.score.toInt()}/100 — ${r.message.ifBlank { r.status.name }}"
                 }
-            )
+                val review = openRouterClient.reviewSubmission(
+                    checkResults = checkResultsText,
+                    candidateName = submission.candidateName,
+                    finalScore = submission.finalScore,
+                )
+                logcat(TAG, DEBUG) { "AI-анализ получен — длина=${review.length}" }
+                _uiState.update { it.copy(aiReviewState = AiReviewState.Done(review)) }
+            } catch (e: Exception) {
+                logcat(TAG, ERROR) { "Ошибка AI-анализа: ${e.message}" }
+                _uiState.update {
+                    it.copy(
+                        aiReviewState = AiReviewState.Error(
+                            e.message ?: "Не удалось получить анализ"
+                        )
+                    )
+                }
+            }
         }
     }
 }

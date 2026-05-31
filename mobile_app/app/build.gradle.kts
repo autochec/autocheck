@@ -13,6 +13,12 @@ android {
         }
     }
 
+    val localProps = rootProject.file("local.properties")
+    val openRouterKey = if (localProps.exists()) {
+        java.util.Properties().apply { load(localProps.inputStream()) }
+            .getProperty("OPENROUTER_API_KEY", "")
+    } else ""
+
     defaultConfig {
         applicationId = "com.hrconnect.android"
         minSdk = 34
@@ -21,6 +27,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "OPENROUTER_API_KEY", "\"$openRouterKey\"")
     }
 
     buildTypes {
@@ -38,6 +45,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
