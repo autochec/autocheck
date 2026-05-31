@@ -1,0 +1,14 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-primary: #2563EB;
+  --c-success: #16A34A;
+  --c-warning: #D97706;
+  --c-error:   #DC2626;
+  --c-neutral: #6B7280;
+}
+
+body { font-family: 'DM Sans', sans-serif; background: #F9FAFB; color: #111827; }
