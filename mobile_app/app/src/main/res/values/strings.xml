@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">AutoCheck</string>
+    <string name="email_error">Lowercase letters and digits only (name@domain.ru)</string>
+    <string name="password_error">Minimum 8 characters</string>
+    <string name="confirm_password_error">Passwords do not match</string>
+    <string name="accepted_formats_desc">PDF, DOCX up to 10MB each. Maximum 5\nfiles.</string>
+</resources>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accepted_formats_desc">PDF, DOCX каждый до 10MB. Максимум 5\nфайлов.</string>
+</resources>
