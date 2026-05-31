@@ -1,9 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
+
+val localProps = Properties().also { props ->
+    val file = rootProject.file("local.properties")
+    if (file.exists()) props.load(file.inputStream())
+}
+val openRouterKey: String = localProps.getProperty("OPENROUTER_API_KEY", "")
 
 android {
     namespace = "com.hrconnect.android"
@@ -21,6 +29,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "OPENROUTER_API_KEY", "\"$openRouterKey\"")
     }
 
     buildTypes {
@@ -38,6 +47,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

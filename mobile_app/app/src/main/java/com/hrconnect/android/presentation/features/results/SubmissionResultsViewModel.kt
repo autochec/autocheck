@@ -3,9 +3,11 @@ package com.hrconnect.android.presentation.features.results
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hrconnect.android.data.ai.OpenRouterClient
 import com.hrconnect.android.domain.model.CheckResult
 import com.hrconnect.android.domain.model.Submission
 import com.hrconnect.android.domain.repository.SubmissionsRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,36 +18,24 @@ import logcat.LogPriority.DEBUG
 import logcat.LogPriority.ERROR
 import logcat.logcat
 
-/**
- * Состояние экрана «Результаты проверки».
- *
- * @property submission данные проверки (null во время загрузки)
- * @property checkResults список результатов чекеров
- * @property aiReview текст AI-анализа (null если недоступен)
- * @property isLoading идёт ли загрузка
- * @property error сообщение ошибки (null = нет ошибки)
- */
+sealed interface AiReviewState {
+    data object Idle : AiReviewState
+    data object Loading : AiReviewState
+    data class Done(val text: String) : AiReviewState
+    data class Error(val message: String) : AiReviewState
+}
+
 data class SubmissionResultsUiState(
     val submission: Submission? = null,
     val checkResults: List<CheckResult> = emptyList(),
-    val aiReview: String? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
+    val aiReviewState: AiReviewState = AiReviewState.Idle,
 )
 
-/**
- * ViewModel экрана «Результаты проверки».
- *
- * Ответственность:
- * - Загрузка данных проверки, результатов чекеров и AI-анализа.
- * - Параллельная загрузка данных для ускорения отображения.
- * - Обработка graceful degradation: AI-анализ недоступен — показываем плашку.
- *
- * Дата создания: 31-05-2026
- * Автор: Команда №2
- */
 class SubmissionResultsViewModel(
     private val submissionsRepository: SubmissionsRepository,
+    private val openRouterClient: OpenRouterClient,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -53,74 +43,79 @@ class SubmissionResultsViewModel(
         private const val TAG = "SubmissionResultsViewModel"
     }
 
-    // Извлекаем submissionId из аргументов навигации
     private val submissionId: String = checkNotNull(savedStateHandle["submissionId"])
 
     private val _uiState = MutableStateFlow(SubmissionResultsUiState())
     val uiState: StateFlow<SubmissionResultsUiState> = _uiState.asStateFlow()
 
+    private var aiJob: Job? = null
+
     init {
-        logcat(TAG) { "[SubmissionResultsViewModel]: Инициализация — submissionId=$submissionId" }
+        logcat(TAG) { "Инициализация — submissionId=$submissionId" }
         loadData()
     }
 
-    /**
-     * Загружает все данные экрана параллельно:
-     * - детали проверки (submission)
-     * - результаты чекеров (checkResults)
-     * - AI-анализ кода (aiReview, может быть недоступен)
-     *
-     * Если AI-анализ недоступен — продолжаем работу без него (graceful degradation).
-     */
     fun loadData() {
-        logcat(TAG) {
-            "[SubmissionResultsViewModel]: Загрузка данных проверки — submissionId=$submissionId"
-        }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            // Параллельная загрузка основных данных
             val submissionDeferred = async { submissionsRepository.getSubmission(submissionId) }
             val resultsDeferred = async { submissionsRepository.getResults(submissionId) }
-            val aiDeferred = async { submissionsRepository.getAiReview(submissionId) }
 
-            val submissionResult = submissionDeferred.await()
-            val resultsResult = resultsDeferred.await()
-            // AI-анализ — graceful degradation: ошибка не блокирует отображение
-            val aiReview = aiDeferred.await().getOrNull()
-
-            submissionResult.fold(
+            submissionDeferred.await().fold(
                 onSuccess = { submission ->
                     logcat(TAG, DEBUG) {
-                        "[SubmissionResultsViewModel]: Проверка загружена — status=${submission.status}, score=${submission.finalScore}"
-                    }
-                    val checkResults = resultsResult.getOrDefault(emptyList())
-                    logcat(TAG, DEBUG) {
-                        "[SubmissionResultsViewModel]: Результатов чекеров — count=${checkResults.size}"
-                    }
-                    if (aiReview == null) {
-                        logcat(TAG) {
-                            "[SubmissionResultsViewModel]: AI-анализ недоступен — submissionId=$submissionId"
-                        }
+                        "Проверка загружена — status=${submission.status}, score=${submission.finalScore}"
                     }
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             submission = submission,
-                            checkResults = checkResults,
-                            aiReview = aiReview
+                            checkResults = resultsDeferred.await().getOrDefault(emptyList()),
                         )
                     }
                 },
                 onFailure = { e ->
-                    logcat(TAG, ERROR) {
-                        "[SubmissionResultsViewModel]: Ошибка загрузки проверки — ${e.message}"
-                    }
+                    logcat(TAG, ERROR) { "Ошибка загрузки: ${e.message}" }
                     _uiState.update {
                         it.copy(isLoading = false, error = e.message ?: "Ошибка загрузки")
                     }
                 }
             )
+        }
+    }
+
+    /** Запрашивает AI-анализ напрямую через OpenRouter. */
+    fun requestAiReview() {
+        val state = _uiState.value
+        val submission = state.submission ?: return
+
+        aiJob?.cancel()
+        aiJob = viewModelScope.launch {
+            _uiState.update { it.copy(aiReviewState = AiReviewState.Loading) }
+            logcat(TAG) { "Запрос AI-анализа через OpenRouter — submissionId=$submissionId" }
+
+            try {
+                val checkResultsText = state.checkResults.joinToString("\n") { r ->
+                    "• ${r.checker}: ${r.score.toInt()}/100 — ${r.message.ifBlank { r.status.name }}"
+                }
+                val review = openRouterClient.reviewSubmission(
+                    checkResults = checkResultsText,
+                    candidateName = submission.candidateName,
+                    finalScore = submission.finalScore,
+                )
+                logcat(TAG, DEBUG) { "AI-анализ получен — длина=${review.length}" }
+                _uiState.update { it.copy(aiReviewState = AiReviewState.Done(review)) }
+            } catch (e: Exception) {
+                logcat(TAG, ERROR) { "Ошибка AI-анализа: ${e.message}" }
+                _uiState.update {
+                    it.copy(
+                        aiReviewState = AiReviewState.Error(
+                            e.message ?: "Не удалось получить анализ"
+                        )
+                    )
+                }
+            }
         }
     }
 }
